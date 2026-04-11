@@ -12,3 +12,5 @@ services:
         value: "0.0.0.0"
       - key: DASHBOARD_PORT
         value: "10000"
+      - key: DATABASE_URL
+        sync: false

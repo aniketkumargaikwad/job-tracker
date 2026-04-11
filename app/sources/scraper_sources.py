@@ -4,9 +4,8 @@ Best-effort scrapers — these may break when portal HTML changes.
 Each function is wrapped with error handling so pipeline always continues.
 
 Covers:
-    LinkedIn (public search), Indeed (IN/US/UK/AU/AE/EU), Naukri.com,
-    SimplyHired, GulfTalent, Bayt.com, CWJobs, Wellfound (AngelList),
-    Glassdoor public, Google Jobs via DuckDuckGo
+    LinkedIn (public search), Naukri.com (API), Indeed (RSS multi-country),
+    DuckDuckGo job search
 """
 from __future__ import annotations
 
@@ -14,6 +13,7 @@ import logging
 import random
 import re
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import quote_plus, urlencode, urljoin
 
@@ -109,294 +109,222 @@ def fetch_linkedin() -> list[RawJob]:
     return jobs
 
 
-# ── Indeed (multi-country) ──────────────────────────────────────────────────
+# ── Naukri.com (API endpoint — much more reliable than HTML scrape) ──────────
 
-INDEED_DOMAINS = {
-    "in": "https://www.indeed.co.in",
-    "us": "https://www.indeed.com",
-    "uk": "https://www.indeed.co.uk",
-    "au": "https://au.indeed.com",
-    "ae": "https://www.indeed.ae",
-    "ca": "https://ca.indeed.com",
-    "de": "https://de.indeed.com",
-    "nl": "https://www.indeed.nl",
-    "sg": "https://www.indeed.com.sg",
+
+_NAUKRI_API = "https://www.naukri.com/jobapi/v3/search"
+
+_NAUKRI_QUERIES = [
+    {"keyword": ".net developer", "location": "remote"},
+    {"keyword": "c# developer", "location": "remote"},
+    {"keyword": "dotnet developer", "location": ""},
+    {"keyword": ".net core developer", "location": ""},
+    {"keyword": "asp.net developer", "location": ""},
+    {"keyword": "angular developer", "location": "remote"},
+    {"keyword": "full stack .net", "location": ""},
+    {"keyword": "microservices c#", "location": ""},
+    {"keyword": ".net developer", "location": "pune"},
+    {"keyword": ".net developer", "location": "bangalore"},
+    {"keyword": ".net developer", "location": "hyderabad"},
+    {"keyword": "c# developer", "location": "mumbai"},
+]
+
+
+def fetch_naukri() -> list[RawJob]:
+    """Fetch jobs from Naukri.com using their internal search API.
+    This returns JSON and is far more reliable than HTML scraping."""
+    jobs: list[RawJob] = []
+    seen_ids: set[str] = set()
+
+    for q in _NAUKRI_QUERIES:
+        try:
+            params = {
+                "noOfResults": 50,
+                "urlType": "search_by_keyword",
+                "searchType": "adv",
+                "keyword": q["keyword"],
+                "pageNo": 1,
+                "k": q["keyword"],
+                "suitableJobs": "false",
+                "src": "jobsearchDesk",
+                "latLong": "",
+            }
+            if q["location"]:
+                params["location"] = q["location"]
+
+            headers = {
+                "User-Agent": random.choice(_UA),
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "appid": "109",
+                "systemid": "Naukri",
+                "gid": "LOCATION,INDUSTRY,EDUCATION,FAREA_ROLE",
+                "Content-Type": "application/json",
+            }
+            resp = _session.get(_NAUKRI_API, params=params, headers=headers, timeout=20)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                job_details = data.get("jobDetails", [])
+                for item in job_details:
+                    jid = str(item.get("jobId", ""))
+                    if not jid or jid in seen_ids:
+                        continue
+                    seen_ids.add(jid)
+
+                    title = item.get("title", "")
+                    company = item.get("companyName", "")
+                    apply_link = item.get("jdURL", "")
+                    if apply_link and not apply_link.startswith("http"):
+                        apply_link = "https://www.naukri.com" + apply_link
+
+                    # Extract skills from tags
+                    tags = item.get("tagsAndSkills", "") or ""
+                    placeholders = item.get("placeholders", [])
+                    location_parts = []
+                    experience_text = ""
+                    salary_text = ""
+                    for ph in placeholders:
+                        if ph.get("type") == "location":
+                            location_parts.append(ph.get("label", ""))
+                        elif ph.get("type") == "experience":
+                            experience_text = ph.get("label", "")
+                        elif ph.get("type") == "salary":
+                            salary_text = ph.get("label", "")
+
+                    location = ", ".join(location_parts) if location_parts else "India"
+                    description = f"{tags} | Experience: {experience_text}" if experience_text else tags
+
+                    if not title or not apply_link:
+                        continue
+
+                    jobs.append(RawJob(
+                        source="naukri",
+                        external_id=jid,
+                        title=title,
+                        company=company,
+                        location=location,
+                        description=description,
+                        apply_link=apply_link,
+                        posted_at=item.get("footerPlaceholderLabel", ""),
+                        salary_text=salary_text,
+                    ))
+            else:
+                log.warning("naukri API (%s): HTTP %d", q["keyword"], resp.status_code)
+
+            time.sleep(1.5)
+        except Exception as exc:
+            log.warning("naukri (%s): %s", q["keyword"], exc)
+
+    log.info("naukri API: fetched %d jobs across %d queries", len(jobs), len(_NAUKRI_QUERIES))
+    return jobs
+
+
+# ── Indeed (RSS feeds — multi-country, no JS needed) ─────────────────────────
+
+INDEED_RSS_FEEDS = {
+    "in": "https://www.indeed.co.in/rss",
+    "us": "https://www.indeed.com/rss",
+    "uk": "https://uk.indeed.com/rss",
+    "au": "https://au.indeed.com/rss",
+    "ca": "https://ca.indeed.com/rss",
+    "ae": "https://www.indeed.ae/rss",
+    "de": "https://de.indeed.com/rss",
+    "sg": "https://www.indeed.com.sg/rss",
+    "nl": "https://www.indeed.nl/rss",
 }
 
+_INDEED_TERMS = [
+    ".net developer",
+    "c# developer",
+    "dotnet developer",
+    ".net core",
+    "angular developer",
+]
 
-def _fetch_indeed_country(domain: str, country: str) -> list[RawJob]:
+
+def _fetch_indeed_rss(base_url: str, country: str) -> list[RawJob]:
+    """Fetch jobs from Indeed RSS feed for one country."""
     jobs: list[RawJob] = []
-    for term in SEARCH_TERMS[:2]:
+    seen: set[str] = set()
+
+    for term in _INDEED_TERMS:
         try:
-            params = {"q": term, "l": "", "remotejob": "032b3046-06a3-4876-8dfd-474eb5e7ed11", "sort": "date", "fromage": "7"}
-            soup = _get_html(f"{domain}/jobs?" + urlencode(params))
-            cards = soup.select("div.job_seen_beacon, div.cardOutline, div.result")
-            for card in cards[:20]:
-                title_el = card.select_one("h2.jobTitle a, a.jcs-JobTitle")
-                company_el = card.select_one("span[data-testid='company-name'], span.companyName")
-                loc_el = card.select_one("div[data-testid='text-location'], div.companyLocation")
-                salary_el = card.select_one("div.salary-snippet-container, div.metadata.salary-snippet-container")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                    if href and not href.startswith("http"):
-                        href = urljoin(domain, href)
-                if not _text(title_el) or not href:
+            params = {"q": term, "l": "remote", "sort": "date", "fromage": "7"}
+            # India-specific: search across multiple cities too
+            locations = ["remote"]
+            if country == "in":
+                locations.extend(["work from home", "pune", "bangalore", "hyderabad"])
+
+            for loc in locations:
+                params["l"] = loc
+                url = f"{base_url}?{urlencode(params)}"
+                resp = _session.get(url, headers=_headers(), timeout=20)
+
+                if resp.status_code != 200:
                     continue
-                jobs.append(RawJob(
-                    source=f"indeed_{country}",
-                    external_id=href.split("jk=")[-1][:16] if "jk=" in href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "Remote",
-                    description="",
-                    apply_link=href,
-                    posted_at="",
-                    salary_text=_text(salary_el),
-                ))
-            time.sleep(2)
+
+                # Parse RSS XML
+                try:
+                    root = ET.fromstring(resp.text)
+                except ET.ParseError:
+                    continue
+
+                for item in root.iter("item"):
+                    title_el = item.find("title")
+                    link_el = item.find("link")
+                    desc_el = item.find("description")
+                    pub_el = item.find("pubDate")
+                    source_el = item.find("source")
+
+                    title = title_el.text.strip() if title_el is not None and title_el.text else ""
+                    link = link_el.text.strip() if link_el is not None and link_el.text else ""
+                    desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
+                    pub_date = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
+                    company = source_el.text.strip() if source_el is not None and source_el.text else ""
+
+                    if not title or not link or link in seen:
+                        continue
+                    seen.add(link)
+
+                    # Strip HTML from description
+                    if "<" in desc:
+                        desc = BeautifulSoup(desc, "lxml").get_text(strip=True)
+
+                    jobs.append(RawJob(
+                        source=f"indeed_{country}",
+                        external_id=link.split("jk=")[-1][:16] if "jk=" in link else link[-20:],
+                        title=title,
+                        company=company,
+                        location=f"Remote ({country.upper()})" if loc == "remote" else loc.title(),
+                        description=desc[:500],
+                        apply_link=link,
+                        posted_at=pub_date,
+                        salary_text="",
+                    ))
+
+                if country != "in":
+                    break  # Only India gets multi-city search
+
+            time.sleep(1)
         except Exception as exc:
-            log.warning("indeed_%s (%s): %s", country, term, exc)
+            log.warning("indeed_rss_%s (%s): %s", country, term, exc)
+
     return jobs
 
 
 def fetch_indeed_all() -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for country, domain in INDEED_DOMAINS.items():
-        result = _fetch_indeed_country(domain, country)
-        jobs.extend(result)
-        if not result:
-            # If the first country fails with 403, skip remaining to save time
-            log.info("Indeed %s returned 0 — continuing to next country", country)
-    return jobs
-
-
-# ── Naukri.com ──────────────────────────────────────────────────────────────
-
-
-def fetch_naukri() -> list[RawJob]:
-    """Scrape Naukri.com search results via their search URL format."""
-    jobs: list[RawJob] = []
-    queries = [
-        "dot-net-developer-work-from-home",
-        "c-sharp-developer-remote",
-        "angular-developer-remote",
-        "microservices-developer-remote",
-    ]
-    for q in queries:
+    """Fetch from all Indeed RSS feeds across countries."""
+    all_jobs: list[RawJob] = []
+    for country, base_url in INDEED_RSS_FEEDS.items():
         try:
-            url = f"https://www.naukri.com/{q}-jobs"
-            soup = _get_html(url)
-            # Naukri uses multiple card formats
-            cards = soup.select(
-                "article.jobTuple, "
-                "div.srp-jobtuple-wrapper, "
-                "div.cust-job-tuple, "
-                "div[class*='jobTuple'], "
-                "div[class*='job-listing']"
-            )
-            for card in cards[:20]:
-                title_el = card.select_one(
-                    "a.title, a.job-title-href, "
-                    "a[class*='title'], "
-                    "h2 a"
-                )
-                company_el = card.select_one(
-                    "a.subTitle, a.comp-name, "
-                    "span.comp-name, "
-                    "a[class*='comp-name'], "
-                    "span[class*='comp-name']"
-                )
-                loc_el = card.select_one(
-                    "span.locWdth, span.loc-wrap, "
-                    "li.location span, span.loc, "
-                    "span[class*='loc']"
-                )
-                salary_el = card.select_one(
-                    "span.sal, li.salary span, "
-                    "span.sal-wrap, "
-                    "span[class*='sal']"
-                )
-                skills_el = card.select("li.tag, span.tag, span[class*='tag']")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                if not _text(title_el) or not href:
-                    continue
-                desc_parts = [_text(s) for s in skills_el]
-                jobs.append(RawJob(
-                    source="naukri",
-                    external_id=href.split("-")[-1] if href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "India",
-                    description=" ".join(desc_parts),
-                    apply_link=href,
-                    posted_at="",
-                    salary_text=_text(salary_el),
-                ))
-            time.sleep(2)
+            result = _fetch_indeed_rss(base_url, country)
+            all_jobs.extend(result)
+            log.info("indeed_rss_%s: %d jobs", country, len(result))
         except Exception as exc:
-            log.warning("naukri (%s): %s", q, exc)
-    return jobs
-
-
-# ── SimplyHired ─────────────────────────────────────────────────────────────
-
-
-def fetch_simplyhired() -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for term in SEARCH_TERMS[:2]:
-        try:
-            soup = _get_html(
-                f"https://www.simplyhired.com/search?q={quote_plus(term)}&l=remote"
-            )
-            cards = soup.select("article[data-testid='searchSerpJob'], li.SerpJob-jobCard")
-            for card in cards[:20]:
-                title_el = card.select_one("h2 a, a.card-link")
-                company_el = card.select_one("span[data-testid='companyName'], span.JobPosting-labelWithIcon")
-                loc_el = card.select_one("span[data-testid='searchSerpJobLocation']")
-                salary_el = card.select_one("span[data-testid='searchSerpJobSalary']")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                    if href and not href.startswith("http"):
-                        href = "https://www.simplyhired.com" + href
-                if not _text(title_el) or not href:
-                    continue
-                jobs.append(RawJob(
-                    source="simplyhired",
-                    external_id=href.split("/")[-1] if href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "Remote",
-                    description="",
-                    apply_link=href,
-                    posted_at="",
-                    salary_text=_text(salary_el),
-                ))
-            time.sleep(2)
-        except Exception as exc:
-            log.warning("simplyhired (%s): %s", term, exc)
-    return jobs
-
-
-# ── GulfTalent (UAE / Middle East) ──────────────────────────────────────────
-
-
-def fetch_gulftalet() -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for term in [".net", "angular"]:
-        try:
-            soup = _get_html(
-                f"https://www.gulftalent.com/jobs/search?keywords={quote_plus(term)}&work_type=remote"
-            )
-            cards = soup.select("div.job-card, div.search-result, article.job-listing")
-            for card in cards[:20]:
-                title_el = card.select_one("h2 a, a.job-title")
-                company_el = card.select_one("span.company-name, div.company")
-                loc_el = card.select_one("span.location, div.location")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                    if href and not href.startswith("http"):
-                        href = "https://www.gulftalent.com" + href
-                if not _text(title_el):
-                    continue
-                jobs.append(RawJob(
-                    source="gulftalet",
-                    external_id=href.split("/")[-1] if href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "UAE",
-                    description="",
-                    apply_link=href or f"https://www.gulftalent.com/jobs/search?keywords={quote_plus(term)}",
-                    posted_at="",
-                    salary_text="",
-                ))
-            time.sleep(2)
-        except Exception as exc:
-            log.warning("gulftalet (%s): %s", term, exc)
-    return jobs
-
-
-# ── Bayt.com (Middle East) ──────────────────────────────────────────────────
-
-
-def fetch_bayt() -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for term in [".net developer", "angular developer"]:
-        try:
-            soup = _get_html(
-                f"https://www.bayt.com/en/international/jobs/{quote_plus(term)}-jobs/?filters%5Bjb_work_type_val%5D%5B%5D=remote"
-            )
-            cards = soup.select("li[data-js-job], div.has-new-job-card")
-            for card in cards[:20]:
-                title_el = card.select_one("h2 a, a.jb-title")
-                company_el = card.select_one("b.jb-company, span.jb-company")
-                loc_el = card.select_one("span.jb-loc")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                    if href and not href.startswith("http"):
-                        href = "https://www.bayt.com" + href
-                if not _text(title_el):
-                    continue
-                jobs.append(RawJob(
-                    source="bayt",
-                    external_id=href.split("/")[-1] if href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "Middle East",
-                    description="",
-                    apply_link=href or "https://www.bayt.com",
-                    posted_at="",
-                    salary_text="",
-                ))
-            time.sleep(2)
-        except Exception as exc:
-            log.warning("bayt (%s): %s", term, exc)
-    return jobs
-
-
-# ── CWJobs (UK) ────────────────────────────────────────────────────────────
-
-
-def fetch_cwjobs() -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for term in [".net", "c# developer"]:
-        try:
-            soup = _get_html(
-                f"https://www.cwjobs.co.uk/jobs/{quote_plus(term)}/remote"
-            )
-            cards = soup.select("article[data-testid='job-card'], div.job-resultContent")
-            for card in cards[:20]:
-                title_el = card.select_one("h2 a, a[data-testid='job-title']")
-                company_el = card.select_one("span[data-testid='company'], span.company")
-                loc_el = card.select_one("span[data-testid='location']")
-                salary_el = card.select_one("span[data-testid='salary']")
-                href = ""
-                if title_el:
-                    href = title_el.get("href", "")
-                    if href and not href.startswith("http"):
-                        href = "https://www.cwjobs.co.uk" + href
-                if not _text(title_el):
-                    continue
-                jobs.append(RawJob(
-                    source="cwjobs",
-                    external_id=href.split("/")[-1] if href else "",
-                    title=_text(title_el),
-                    company=_text(company_el),
-                    location=_text(loc_el) or "UK Remote",
-                    description="",
-                    apply_link=href or "https://www.cwjobs.co.uk",
-                    posted_at="",
-                    salary_text=_text(salary_el),
-                ))
-            time.sleep(2)
-        except Exception as exc:
-            log.warning("cwjobs (%s): %s", term, exc)
-    return jobs
+            log.warning("indeed_rss_%s: %s", country, exc)
+        time.sleep(0.5)
+    return all_jobs
 
 
 # ── Wellfound / AngelList ──────────────────────────────────────────────────
@@ -519,13 +447,12 @@ def fetch_duckduckgo_jobs() -> list[RawJob]:
 
 
 # ── Exports ──────────────────────────────────────────────────────────────────
-# Only sources that actually work with plain requests are enabled.
-# Indeed/SimplyHired/GulfTalent/Bayt/CWJobs/Wellfound/Glassdoor all return
-# 403 Forbidden — they require browser JS rendering or CAPTCHA solving.
-# Those are kept as functions above but excluded from the active list.
+# Active sources: LinkedIn, Naukri (API), Indeed (RSS multi-country), DuckDuckGo
+# Dead (403): SimplyHired, GulfTalent, Bayt, CWJobs, Wellfound, Glassdoor
 
 SCRAPER_SOURCES = [
     ("linkedin", fetch_linkedin),
     ("naukri", fetch_naukri),
+    ("indeed_rss", fetch_indeed_all),
     ("duckduckgo", fetch_duckduckgo_jobs),
 ]

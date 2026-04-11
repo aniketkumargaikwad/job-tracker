@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 
 from app.config import SETTINGS
-from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job
+from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job, _USE_PG, _cursor, _execute
 from app.emailer import send_email
 from app.enrichment import enrich_job
 from app.scoring import extract_skills, fingerprint, is_likely_duplicate, relevance_score
@@ -20,9 +20,11 @@ log = logging.getLogger(__name__)
 
 
 def _title_company_pairs() -> list[tuple[str, str]]:
-    with get_conn() as conn:
-        rows = conn.execute("SELECT title, company FROM jobs").fetchall()
-        return [(r["title"], r["company"]) for r in rows]
+    with _cursor() as cur:
+        _execute(cur, "SELECT title, company FROM jobs")
+        rows = cur.fetchall()
+        return [(r["title"] if isinstance(r, dict) else r["title"],
+                 r["company"] if isinstance(r, dict) else r["company"]) for r in rows]
 
 
 def _should_keep(title: str, company: str, score: float) -> bool:
@@ -38,10 +40,28 @@ def _should_keep(title: str, company: str, score: float) -> bool:
 def run_pipeline(send_mail: bool = True) -> dict:
     init_db()
     started = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        run_id = conn.execute(
-            "INSERT INTO run_log(started_at, source_stats) VALUES (?, ?)", (started, "")
-        ).lastrowid
+
+    # Insert run log entry
+    if _USE_PG:
+        import psycopg2
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO run_log(started_at, source_stats) VALUES (%s, %s) RETURNING id", (started, ""))
+            run_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    else:
+        conn = get_conn()
+        try:
+            run_id = conn.execute(
+                "INSERT INTO run_log(started_at, source_stats) VALUES (?, ?)", (started, "")
+            ).lastrowid
+            conn.commit()
+        finally:
+            conn.close()
 
     log.info("Pipeline started at %s", started)
     t0 = time.monotonic()
@@ -142,9 +162,9 @@ def run_pipeline(send_mail: bool = True) -> dict:
         try:
             send_email(digest)
             log.info("Email sent with %d jobs", len(digest))
-            with get_conn() as conn:
+            with _cursor() as cur:
                 for row in digest:
-                    conn.execute(
+                    _execute(cur,
                         "INSERT INTO applications(job_id, portal, status, details, attempted_at) VALUES (?, ?, ?, ?, ?)",
                         (row["job_id"], "email_digest", "emailed", "", datetime.now(timezone.utc).isoformat()),
                     )
@@ -153,8 +173,8 @@ def run_pipeline(send_mail: bool = True) -> dict:
 
     # 6. Update run log
     t_total = time.monotonic() - t0
-    with get_conn() as conn:
-        conn.execute(
+    with _cursor() as cur:
+        _execute(cur,
             "UPDATE run_log SET finished_at = ?, fetched_count = ?, stored_count = ?, source_stats = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), len(raw_jobs), saved,
              f"dup={skipped_dup},filtered={skipped_filter},invalid={skipped_invalid}", run_id),
