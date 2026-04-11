@@ -1,0 +1,25 @@
+# Environment
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (SQLite DB is created at runtime)
+data/jobs.db
+data/jobs.db-wal
+data/jobs.db-shm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment artifacts
+requirements-deploy.txt

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: job-tracker
+    runtime: python
+    plan: free
+    buildCommand: bash build.sh
+    startCommand: gunicorn app.web_dashboard:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DASHBOARD_HOST
+        value: "0.0.0.0"
+      - key: DASHBOARD_PORT
+        value: "10000"
+    disk:
+      name: job-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
+  - type: cron
+    name: daily-job-digest
+    runtime: python
+    plan: free
+    buildCommand: bash build.sh
+    schedule: "30 1 * * *"  # 01:30 UTC = 07:00 IST
+    startCommand: python main.py run
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
