@@ -5,7 +5,7 @@ Each function is wrapped with error handling so pipeline always continues.
 
 Covers:
     LinkedIn (public search), Shine.com (India), Indeed (RSS multi-country),
-    DuckDuckGo job search
+    DuckDuckGo job search, Company Career Pages (Greenhouse/Lever)
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from urllib.parse import quote_plus, urlencode, urljoin
 import requests
 from bs4 import BeautifulSoup, Tag
 
+import app.sources as _sources_pkg
 from app.models import RawJob
 
 log = logging.getLogger(__name__)
@@ -114,20 +115,15 @@ def fetch_linkedin() -> list[RawJob]:
 # Shine.com (by HT Media) is a reliable Indian alternative with SSR HTML.
 
 _SHINE_SLUGS = [
-    "dot-net-developer-jobs",
-    "c-sharp-developer-jobs",
-    "dotnet-developer-jobs",
-    "asp-dot-net-developer-jobs",
-    "dot-net-core-developer-jobs",
-    "angular-developer-jobs",
-    "full-stack-dot-net-developer-jobs",
     "dotnet-developer-work-from-home-jobs",
     "dot-net-developer-work-from-home-jobs",
-    "microservices-developer-jobs",
-    "azure-developer-jobs",
-    "dot-net-developer-jobs-in-pune",
-    "dot-net-developer-jobs-in-bangalore",
-    "dot-net-developer-jobs-in-hyderabad",
+    "c-sharp-developer-work-from-home-jobs",
+    "asp-dot-net-developer-work-from-home-jobs",
+    "angular-developer-work-from-home-jobs",
+    "full-stack-dot-net-developer-work-from-home-jobs",
+    "azure-developer-work-from-home-jobs",
+    "dot-net-core-developer-work-from-home-jobs",
+    "microservices-developer-work-from-home-jobs",
 ]
 
 
@@ -251,11 +247,9 @@ def _fetch_indeed_rss(base_url: str, country: str) -> list[RawJob]:
 
     for term in _INDEED_TERMS:
         try:
-            params = {"q": term, "l": "remote", "sort": "date", "fromage": "7"}
-            # India-specific: search across multiple cities too
+            params = {"q": term, "l": "remote", "sort": "date", "fromage": str(_sources_pkg._lookback_days)}
+            # Only search remote positions across all countries
             locations = ["remote"]
-            if country == "in":
-                locations.extend(["work from home", "pune", "bangalore", "hyderabad"])
 
             for loc in locations:
                 params["l"] = loc
@@ -297,15 +291,12 @@ def _fetch_indeed_rss(base_url: str, country: str) -> list[RawJob]:
                         external_id=link.split("jk=")[-1][:16] if "jk=" in link else link[-20:],
                         title=title,
                         company=company,
-                        location=f"Remote ({country.upper()})" if loc == "remote" else loc.title(),
+                        location=f"Remote ({country.upper()})",
                         description=desc[:500],
                         apply_link=link,
                         posted_at=pub_date,
                         salary_text="",
                     ))
-
-                if country != "in":
-                    break  # Only India gets multi-city search
 
             time.sleep(1)
         except Exception as exc:
@@ -447,13 +438,175 @@ def fetch_duckduckgo_jobs() -> list[RawJob]:
     return jobs
 
 
+# ── Company Career Pages (Google/DuckDuckGo discovery) ─────────────────────
+
+# Well-known company career API endpoints and Greenhouse/Lever/Workday boards
+# that expose JSON job listings. Each entry: (company_name, jobs_url, parser_type)
+_CAREER_BOARDS = [
+    # ── Greenhouse boards (JSON API) ──
+    ("Microsoft", "https://boards-api.greenhouse.io/v1/boards/microsoftit/jobs", "greenhouse"),
+    ("Twilio", "https://boards-api.greenhouse.io/v1/boards/twilio/jobs", "greenhouse"),
+    ("GitLab", "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs", "greenhouse"),
+    ("Cloudflare", "https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs", "greenhouse"),
+    ("Elastic", "https://boards-api.greenhouse.io/v1/boards/elastic/jobs", "greenhouse"),
+    ("HashiCorp", "https://boards-api.greenhouse.io/v1/boards/hashicorp/jobs", "greenhouse"),
+    ("Figma", "https://boards-api.greenhouse.io/v1/boards/figma/jobs", "greenhouse"),
+    ("DataDog", "https://boards-api.greenhouse.io/v1/boards/datadog/jobs", "greenhouse"),
+    ("Confluent", "https://boards-api.greenhouse.io/v1/boards/confluent/jobs", "greenhouse"),
+    ("MongoDB", "https://boards-api.greenhouse.io/v1/boards/mongodb/jobs", "greenhouse"),
+    ("PagerDuty", "https://boards-api.greenhouse.io/v1/boards/pagerduty/jobs", "greenhouse"),
+    ("Reddit", "https://boards-api.greenhouse.io/v1/boards/reddit/jobs", "greenhouse"),
+    ("Coinbase", "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs", "greenhouse"),
+    ("Amplitude", "https://boards-api.greenhouse.io/v1/boards/amplitude/jobs", "greenhouse"),
+    ("Notion", "https://boards-api.greenhouse.io/v1/boards/notion/jobs", "greenhouse"),
+    ("Samsara", "https://boards-api.greenhouse.io/v1/boards/samsara/jobs", "greenhouse"),
+    ("Toast", "https://boards-api.greenhouse.io/v1/boards/toast/jobs", "greenhouse"),
+    ("Grafana Labs", "https://boards-api.greenhouse.io/v1/boards/grafanalabs/jobs", "greenhouse"),
+    ("Navan", "https://boards-api.greenhouse.io/v1/boards/navan/jobs", "greenhouse"),
+    ("Airtable", "https://boards-api.greenhouse.io/v1/boards/airtable/jobs", "greenhouse"),
+    ("Brex", "https://boards-api.greenhouse.io/v1/boards/brex/jobs", "greenhouse"),
+    ("Plaid", "https://boards-api.greenhouse.io/v1/boards/plaid/jobs", "greenhouse"),
+    ("Snyk", "https://boards-api.greenhouse.io/v1/boards/snyk/jobs", "greenhouse"),
+    ("CrowdStrike", "https://boards-api.greenhouse.io/v1/boards/crowdstrike/jobs", "greenhouse"),
+    ("Okta", "https://boards-api.greenhouse.io/v1/boards/okta/jobs", "greenhouse"),
+    ("Gusto", "https://boards-api.greenhouse.io/v1/boards/gusto/jobs", "greenhouse"),
+    ("Compass", "https://boards-api.greenhouse.io/v1/boards/compass/jobs", "greenhouse"),
+    ("Drata", "https://boards-api.greenhouse.io/v1/boards/drata/jobs", "greenhouse"),
+    ("CircleCI", "https://boards-api.greenhouse.io/v1/boards/circleci/jobs", "greenhouse"),
+    ("Sourcegraph", "https://boards-api.greenhouse.io/v1/boards/sourcegraph/jobs", "greenhouse"),
+    ("Temporal", "https://boards-api.greenhouse.io/v1/boards/temporal/jobs", "greenhouse"),
+    ("LaunchDarkly", "https://boards-api.greenhouse.io/v1/boards/launchdarkly/jobs", "greenhouse"),
+    # ── Lever boards (JSON API) ──
+    ("Netflix", "https://jobs.lever.co/v0/postings/netflix?mode=json", "lever"),
+    ("Spotify", "https://jobs.lever.co/v0/postings/spotify?mode=json", "lever"),
+    ("Shopify", "https://jobs.lever.co/v0/postings/shopify?mode=json", "lever"),
+    ("Stripe", "https://jobs.lever.co/v0/postings/stripe?mode=json", "lever"),
+    ("Atlassian", "https://jobs.lever.co/v0/postings/atlassian?mode=json", "lever"),
+    ("Grab", "https://jobs.lever.co/v0/postings/grab?mode=json", "lever"),
+    ("Affirm", "https://jobs.lever.co/v0/postings/affirm?mode=json", "lever"),
+    ("Vercel", "https://jobs.lever.co/v0/postings/vercel?mode=json", "lever"),
+    ("Neon", "https://jobs.lever.co/v0/postings/neondatabase?mode=json", "lever"),
+    ("Linear", "https://jobs.lever.co/v0/postings/linear?mode=json", "lever"),
+    ("Postman", "https://jobs.lever.co/v0/postings/postman?mode=json", "lever"),
+    ("Webflow", "https://jobs.lever.co/v0/postings/webflow?mode=json", "lever"),
+]
+
+# Skills to match in career-page job titles/descriptions
+_CAREER_SKILL_PATTERN = re.compile(
+    r"\.net|c#|dotnet|asp\.net|angular|blazor|entity\s*framework|azure.*developer|microservices",
+    re.I,
+)
+
+_REMOTE_PATTERN = re.compile(
+    r"remote|work\s*from\s*home|wfh|distributed|telecommute|anywhere",
+    re.I,
+)
+
+
+def _parse_greenhouse(company: str, data: dict) -> list[RawJob]:
+    """Parse Greenhouse board API response."""
+    jobs: list[RawJob] = []
+    for item in data.get("jobs", []):
+        title = item.get("title", "")
+        location = item.get("location", {}).get("name", "")
+        combined = f"{title} {location}"
+        # Must be remote AND match skills
+        if not _REMOTE_PATTERN.search(combined):
+            continue
+        if not _CAREER_SKILL_PATTERN.search(combined):
+            # Also check departments/metadata
+            dept_text = " ".join(
+                d.get("name", "") for d in item.get("departments", [])
+            )
+            if not _CAREER_SKILL_PATTERN.search(dept_text):
+                continue
+        abs_url = item.get("absolute_url", "")
+        jobs.append(RawJob(
+            source="career_page",
+            external_id=str(item.get("id", "")),
+            title=title,
+            company=company,
+            location=location or "Remote",
+            description=BeautifulSoup(
+                item.get("content", "")[:1000], "lxml"
+            ).get_text(strip=True) if item.get("content") else "",
+            apply_link=abs_url,
+            posted_at=item.get("updated_at", "")[:10],
+            salary_text="",
+        ))
+    return jobs
+
+
+def _parse_lever(company: str, data: list) -> list[RawJob]:
+    """Parse Lever board API response."""
+    jobs: list[RawJob] = []
+    if not isinstance(data, list):
+        return jobs
+    for item in data:
+        title = item.get("text", "")
+        cats = item.get("categories", {})
+        location = cats.get("location", "")
+        commitment = cats.get("commitment", "")
+        combined = f"{title} {location} {commitment}"
+        # Must be remote AND match skills
+        if not _REMOTE_PATTERN.search(combined):
+            continue
+        if not _CAREER_SKILL_PATTERN.search(combined):
+            desc_plain = item.get("descriptionPlain", "")[:500]
+            if not _CAREER_SKILL_PATTERN.search(desc_plain):
+                continue
+        jobs.append(RawJob(
+            source="career_page",
+            external_id=item.get("id", ""),
+            title=title,
+            company=company,
+            location=location or "Remote",
+            description=item.get("descriptionPlain", "")[:500],
+            apply_link=item.get("hostedUrl", item.get("applyUrl", "")),
+            posted_at=str(item.get("createdAt", ""))[:10],
+            salary_text="",
+        ))
+    return jobs
+
+
+def fetch_career_pages() -> list[RawJob]:
+    """Scrape remote .NET/C#/Angular jobs from company career pages.
+
+    Uses Greenhouse & Lever public JSON APIs — no auth needed.
+    Only keeps jobs that are explicitly remote AND match target skills.
+    """
+    all_jobs: list[RawJob] = []
+    for company, url, parser_type in _CAREER_BOARDS:
+        try:
+            resp = _session.get(url, headers=_headers(), timeout=20)
+            if resp.status_code != 200:
+                log.debug("career_page %s: HTTP %d", company, resp.status_code)
+                continue
+            data = resp.json()
+            if parser_type == "greenhouse":
+                jobs = _parse_greenhouse(company, data)
+            elif parser_type == "lever":
+                jobs = _parse_lever(company, data)
+            else:
+                continue
+            if jobs:
+                log.info("career_page %s: %d remote jobs found", company, len(jobs))
+            all_jobs.extend(jobs)
+            time.sleep(0.5)
+        except Exception as exc:
+            log.debug("career_page %s: %s", company, exc)
+    log.info("career_pages: total %d jobs from %d company boards", len(all_jobs), len(_CAREER_BOARDS))
+    return all_jobs
+
+
 # ── Exports ──────────────────────────────────────────────────────────────────
-# Active sources: LinkedIn, Shine.com (India), Indeed (RSS multi-country), DuckDuckGo
-# Dead/Blocked: Naukri (reCAPTCHA), SimplyHired (403), RemoteOK (403), Wellfound, Glassdoor
+# Active sources: LinkedIn, Shine.com (India), Indeed (RSS multi-country),
+#                 DuckDuckGo, Company Career Pages (Greenhouse/Lever)
 
 SCRAPER_SOURCES = [
     ("linkedin", fetch_linkedin),
     ("shine", fetch_shine),
     ("indeed_rss", fetch_indeed_all),
     ("duckduckgo", fetch_duckduckgo_jobs),
+    ("career_pages", fetch_career_pages),
 ]

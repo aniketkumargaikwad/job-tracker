@@ -125,12 +125,17 @@ def fetch_remoteok() -> list[RawJob]:
 
 
 def fetch_arbeitnow() -> list[RawJob]:
-    """https://arbeitnow.com – free, paginated."""
+    """https://arbeitnow.com – free, paginated. Only remote jobs."""
     jobs: list[RawJob] = []
     for page in range(1, 4):
         try:
             data = _get(f"https://www.arbeitnow.com/api/job-board-api?page={page}").json()
             for item in data.get("data", []):
+                # Only keep remote jobs
+                if not item.get("remote", False):
+                    loc_l = item.get("location", "").lower()
+                    if "remote" not in loc_l:
+                        continue
                 jobs.append(RawJob(
                     source="arbeitnow",
                     external_id=str(item.get("slug", "")),
@@ -213,10 +218,14 @@ def fetch_themuse() -> list[RawJob]:
             try:
                 data = _get(
                     "https://www.themuse.com/api/public/jobs",
-                    params={"category": "Software Engineering", "level": level, "page": str(page)},
+                    params={"category": "Software Engineering", "level": level, "page": str(page), "location": "Flexible / Remote"},
                 ).json()
                 for item in data.get("results", []):
                     locs = ", ".join(loc.get("name", "") for loc in item.get("locations", []))
+                    # Only keep jobs that are remote/flexible
+                    locs_l = locs.lower()
+                    if not any(kw in locs_l for kw in ("remote", "flexible", "anywhere", "distributed")):
+                        continue
                     jobs.append(RawJob(
                         source="themuse",
                         external_id=str(item.get("id", "")),

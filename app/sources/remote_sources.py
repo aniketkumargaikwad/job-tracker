@@ -3,8 +3,8 @@
 Sources (20+):
   API:  Remotive, RemoteOK, Arbeitnow, Himalayas, Jobicy, The Muse,
         FindWork, JoBoard, Adzuna (9 countries), Reed, Jooble
-  Scraping: LinkedIn, Indeed (9 countries), Naukri, SimplyHired,
-            GulfTalent, Bayt, CWJobs, Wellfound, Glassdoor, DuckDuckGo
+  Scraping: LinkedIn, Indeed (9 countries), Shine.com, DuckDuckGo,
+            Company Career Pages (Greenhouse/Lever boards)
 """
 from __future__ import annotations
 

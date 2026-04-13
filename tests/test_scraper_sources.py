@@ -105,7 +105,7 @@ class TestScraperSourceRegistration:
         assert "duckduckgo" in names
 
     def test_source_count(self):
-        assert len(SCRAPER_SOURCES) == 4
+        assert len(SCRAPER_SOURCES) == 5
 
     def test_all_callables(self):
         for name, fn in SCRAPER_SOURCES:

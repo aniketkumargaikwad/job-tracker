@@ -19,6 +19,18 @@ from app.sources.remote_sources import fetch_all_sources
 
 log = logging.getLogger(__name__)
 
+# ── Remote-only gate ─────────────────────────────────────────────────────────
+_REMOTE_KEYWORDS = frozenset([
+    "remote", "work from home", "wfh", "fully remote", "remote-first",
+    "work from anywhere", "telecommute", "distributed", "home office",
+    "remote/hybrid",
+])
+
+def _is_remote(raw) -> bool:
+    """Strict gate: reject any job that is NOT remote."""
+    text = f"{raw.location} {raw.title} {raw.description}".lower()
+    return any(kw in text for kw in _REMOTE_KEYWORDS)
+
 
 def _title_company_pairs() -> list[tuple[str, str]]:
     with _cursor() as cur:
@@ -66,6 +78,18 @@ def run_pipeline(send_mail: bool = True) -> dict:
     log.info("Pipeline started at %s", started)
     t0 = time.monotonic()
 
+    # Determine lookback: 30 days for initial ingestion, 7 for daily sync
+    import app.sources as _sources_pkg
+    with _cursor() as cur:
+        count_rows = _fetchall(cur, "SELECT COUNT(*) AS cnt FROM jobs")
+        job_count = count_rows[0]["cnt"] if isinstance(count_rows[0], dict) else count_rows[0][0]
+    if job_count == 0:
+        _sources_pkg._lookback_days = 30
+        log.info("Initial ingestion — lookback set to 30 days")
+    else:
+        _sources_pkg._lookback_days = 7
+        log.info("Daily sync — lookback set to 7 days (existing jobs: %d)", job_count)
+
     # 1. Fetch from all sources
     raw_jobs = fetch_all_sources()
     t_fetch = time.monotonic()
@@ -84,10 +108,16 @@ def run_pipeline(send_mail: bool = True) -> dict:
     skipped_dup = 0
     skipped_filter = 0
     skipped_invalid = 0
+    skipped_not_remote = 0
 
     for raw in raw_jobs:
         if not raw.is_valid():
             skipped_invalid += 1
+            continue
+
+        # HARD GATE: reject anything that is not remote
+        if not _is_remote(raw):
+            skipped_not_remote += 1
             continue
 
         # Quick relevance check using just title + description (no web calls)
@@ -111,9 +141,9 @@ def run_pipeline(send_mail: bool = True) -> dict:
 
     t_filter = time.monotonic()
     log.info("Pre-filter: %d candidates from %d raw (%.1fs) — "
-             "skipped: %d irrelevant, %d dups, %d invalid",
+             "skipped: %d not-remote, %d irrelevant, %d dups, %d invalid",
              len(candidates), len(raw_jobs), t_filter - t_fetch,
-             skipped_filter, skipped_dup, skipped_invalid)
+             skipped_not_remote, skipped_filter, skipped_dup, skipped_invalid)
 
     # 3. Enrich only the candidates that passed the filter
     saved = 0
@@ -184,7 +214,7 @@ def run_pipeline(send_mail: bool = True) -> dict:
         _execute(cur,
             "UPDATE run_log SET finished_at = ?, fetched_count = ?, stored_count = ?, source_stats = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), len(raw_jobs), saved,
-             f"dup={skipped_dup},filtered={skipped_filter},invalid={skipped_invalid}", run_id),
+             f"dup={skipped_dup},not_remote={skipped_not_remote},filtered={skipped_filter},invalid={skipped_invalid}", run_id),
         )
 
     result = {

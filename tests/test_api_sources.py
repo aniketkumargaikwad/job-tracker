@@ -72,8 +72,8 @@ class TestFetchArbeitnow:
         mock_get.return_value = MagicMock(json=lambda: {
             "data": [
                 {"slug": "job-1", "title": "C# Dev", "company_name": "FirmX",
-                 "location": "Berlin", "description": "Angular", "url": "https://arbeitnow.com/1",
-                 "created_at": "2026-01-01"}
+                 "location": "Remote", "description": "Angular", "url": "https://arbeitnow.com/1",
+                 "created_at": "2026-01-01", "remote": True}
             ]
         })
         jobs = fetch_arbeitnow()
