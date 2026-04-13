@@ -73,6 +73,12 @@ def run_pipeline(send_mail: bool = True) -> dict:
     # 2. FAST pre-filter by relevance score BEFORE expensive enrichment
     #    This avoids enriching hundreds of irrelevant jobs.
     existing_pairs = _title_company_pairs()
+
+    # Batch-load all existing fingerprints (one query instead of per-job)
+    with _cursor() as cur:
+        fp_rows = _fetchall(cur, "SELECT fingerprint FROM jobs")
+    existing_fps: set[str] = {r["fingerprint"] if isinstance(r, dict) else r[0] for r in fp_rows}
+
     candidates = []
     skipped_dup = 0
     skipped_filter = 0
@@ -93,12 +99,13 @@ def run_pipeline(send_mail: bool = True) -> dict:
             skipped_dup += 1
             continue
 
-        # Quick fingerprint check before expensive enrichment
+        # Quick fingerprint check against pre-loaded set (no DB call)
         fp = fingerprint(raw)
-        if fingerprint_exists(fp):
+        if fp in existing_fps:
             skipped_dup += 1
             continue
 
+        existing_fps.add(fp)
         candidates.append(raw)
 
     t_filter = time.monotonic()
@@ -130,7 +137,7 @@ def run_pipeline(send_mail: bool = True) -> dict:
                 "link": enriched.apply_link,
             })
         except Exception as exc:
-            if "UNIQUE constraint" in str(exc):
+            if "UNIQUE constraint" in str(exc) or "unique" in str(exc).lower() or "duplicate key" in str(exc).lower():
                 skipped_dup += 1
             else:
                 log.warning("Failed to insert %s @ %s: %s", enriched.title, enriched.company, exc)

@@ -31,9 +31,18 @@ def set_db_path(path: Optional[str]) -> None:
 # ── Connection helpers ───────────────────────────────────────────────────────
 
 def _pg_conn():
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = False
-    return conn
+    """Create a PostgreSQL connection with retry for transient failures."""
+    import time as _time
+    for attempt in range(3):
+        try:
+            conn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+            conn.autocommit = False
+            return conn
+        except psycopg2.OperationalError:
+            if attempt < 2:
+                _time.sleep(1 * (attempt + 1))
+            else:
+                raise
 
 
 def _sqlite_conn():
