@@ -5,7 +5,7 @@ import pytest
 
 
 class TestCli:
-    @patch("main.run_pipeline", return_value={"fetched": 0, "saved": 0, "emailed": 0})
+    @patch("main.run_pipeline", return_value={"fetched": 0, "saved": 0, "emailed": 0, "skipped_dup": 0, "skipped_filter": 0, "time_seconds": 0, "jobs": []})
     def test_run_command(self, mock_pipeline):
         import sys
         with patch.object(sys, "argv", ["main.py", "run"]):
@@ -13,7 +13,7 @@ class TestCli:
             cli()
         mock_pipeline.assert_called_once_with(send_mail=True)
 
-    @patch("main.run_pipeline", return_value={"fetched": 0, "saved": 0, "emailed": 0})
+    @patch("main.run_pipeline", return_value={"fetched": 0, "saved": 0, "emailed": 0, "skipped_dup": 0, "skipped_filter": 0, "time_seconds": 0, "jobs": []})
     def test_run_no_email_command(self, mock_pipeline):
         import sys
         with patch.object(sys, "argv", ["main.py", "run-no-email"]):

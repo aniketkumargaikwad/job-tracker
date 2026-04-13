@@ -137,7 +137,6 @@ class TestSourceRegistration:
     def test_open_sources_registered(self):
         names = [name for name, _ in OPEN_API_SOURCES]
         assert "remotive" in names
-        assert "remoteok" in names
         assert "arbeitnow" in names
         assert "himalayas" in names
         assert "jobicy" in names

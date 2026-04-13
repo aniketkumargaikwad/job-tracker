@@ -68,7 +68,7 @@ class TestSettings:
 
     def test_settings_dashboard_defaults(self):
         s = Settings()
-        assert s.dashboard_host == "127.0.0.1"
+        assert s.dashboard_host == "0.0.0.0"
         assert s.dashboard_port == 5000
 
 

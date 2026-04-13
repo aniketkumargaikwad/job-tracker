@@ -477,7 +477,7 @@ def fetch_jooble() -> list[RawJob]:
 
 OPEN_API_SOURCES = [
     ("remotive", fetch_remotive),
-    ("remoteok", fetch_remoteok),
+    # remoteok removed — returns 403 from cloud/datacenter IPs
     ("arbeitnow", fetch_arbeitnow),
     ("himalayas", fetch_himalayas),
     ("jobicy", fetch_jobicy),

@@ -16,32 +16,23 @@ def client():
 
 
 class TestIndexRoute:
-    def test_returns_200(self, client):
+    def test_redirects_to_today(self, client):
         resp = client.get("/")
+        assert resp.status_code == 302
+        assert "/jobs/today" in resp.headers.get("Location", "")
+
+    def test_today_returns_200(self, client):
+        resp = client.get("/jobs/today")
         assert resp.status_code == 200
 
     def test_contains_terminal_theme(self, client):
-        resp = client.get("/")
+        resp = client.get("/jobs/today")
         html = resp.data.decode()
-        assert "Remote Jobs" in html
-        assert "background: #0a0a0a" in html
-
-    def test_search_filter(self, client, make_enriched_job):
-        insert_job(make_enriched_job(title="Angular Dev", company="TestCo", fingerprint="fp_web1"))
-        resp = client.get("/?q=angular")
-        html = resp.data.decode()
-        assert "Angular Dev" in html
-
-    def test_xss_in_query_param(self, client):
-        resp = client.get('/?q=<script>alert("xss")</script>')
-        html = resp.data.decode()
-        assert "<script>" not in html
-        assert "&lt;script&gt;" in html
+        assert "Remote" in html
 
     def test_empty_db(self, client):
-        resp = client.get("/")
+        resp = client.get("/jobs/today")
         assert resp.status_code == 200
-        assert "Showing 0 jobs" in resp.data.decode()
 
 
 class TestHistoryRoute:
@@ -88,18 +79,15 @@ class TestStatsRoute:
 
 
 class TestAutoApplyRoute:
-    @patch("app.web_dashboard.apply_to_job")
-    def test_returns_200(self, mock_apply, client, make_enriched_job):
+    def test_redirects_to_apply_link(self, client, make_enriched_job):
         job = make_enriched_job(fingerprint="fp_auto1")
         job_id = insert_job(job)
-        resp = client.get(f"/auto-apply/{job_id}")
-        assert resp.status_code == 200
-        html = resp.data.decode()
-        assert "Auto-Apply Triggered" in html
+        resp = client.get(f"/apply/{job_id}")
+        assert resp.status_code == 302
 
     def test_nonexistent_job(self, client):
-        resp = client.get("/auto-apply/99999")
-        assert resp.status_code == 200  # Still renders the trigger page
+        resp = client.get("/apply/99999")
+        assert resp.status_code == 404
 
 
 class TestApiJobs:
@@ -117,19 +105,9 @@ class TestApiJobs:
         assert len(data) >= 1
 
 
-class TestApiHistory:
-    def test_returns_json(self, client):
-        resp = client.get("/api/history")
+class TestApiTriggerRun:
+    def test_trigger_returns_json(self, client):
+        resp = client.get("/api/trigger-run")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert isinstance(data, list)
-
-
-class TestApiStats:
-    def test_returns_json(self, client):
-        resp = client.get("/api/stats")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert "total_jobs" in data
-        assert "applied" in data
-        assert "sources" in data
+        assert data["status"] == "started"

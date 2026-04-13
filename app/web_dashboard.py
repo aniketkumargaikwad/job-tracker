@@ -31,6 +31,7 @@ from app.db import (
     _cursor,
     _execute,
     _fetchall,
+    _fetchone,
     _USE_PG,
 )
 
@@ -330,10 +331,9 @@ def mark_applied(job_id: int):
 @app.route("/apply/<int:job_id>")
 def quick_apply(job_id: int):
     with _cursor() as cur:
-        row = _execute(cur, "SELECT apply_link FROM jobs WHERE id = ?", (job_id,))
-        row = cur.fetchone()
+        row = _fetchone(cur, "SELECT apply_link FROM jobs WHERE id = ?", (job_id,))
     if row is None:
-        return _page("Not Found", "today", "<h1>Job not found</h1>")
+        return _page("Not Found", "today", "<h1>Job not found</h1>"), 404
     link = row["apply_link"] if isinstance(row, dict) else row[0]
     return redirect(link)
 

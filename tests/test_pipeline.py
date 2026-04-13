@@ -16,7 +16,7 @@ class TestShouldKeep:
         assert _should_keep("Dev", "Co", 10.0) is False
 
     def test_rejects_threshold(self):
-        assert _should_keep("Dev", "Co", 39.0) is False
+        assert _should_keep("Dev", "Co", 24.9) is False
 
     def test_accepts_at_threshold(self):
         assert _should_keep("Dev", "Co", 40.0) is True

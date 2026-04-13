@@ -138,7 +138,7 @@ class TestInferSalary:
     def test_web_research_fallback(self, mock_research):
         raw = RawJob("src", "1", "Dev", "Co", "Remote",
                       "Join our amazing team!", "https://x.com")
-        result = infer_salary(raw)
+        result = infer_salary(raw, web_research=True)
         assert "web research" in result.lower()
 
 

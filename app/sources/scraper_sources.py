@@ -4,7 +4,7 @@ Best-effort scrapers — these may break when portal HTML changes.
 Each function is wrapped with error handling so pipeline always continues.
 
 Covers:
-    LinkedIn (public search), Naukri.com (API), Indeed (RSS multi-country),
+    LinkedIn (public search), Shine.com (India), Indeed (RSS multi-country),
     DuckDuckGo job search
 """
 from __future__ import annotations
@@ -109,114 +109,114 @@ def fetch_linkedin() -> list[RawJob]:
     return jobs
 
 
-# ── Naukri.com (API endpoint — much more reliable than HTML scrape) ──────────
+# ── Shine.com (Indian job portal — server-side rendered) ─────────────────────
+# Naukri.com blocks server-side scraping with reCAPTCHA.
+# Shine.com (by HT Media) is a reliable Indian alternative with SSR HTML.
 
-
-_NAUKRI_API = "https://www.naukri.com/jobapi/v3/search"
-
-_NAUKRI_QUERIES = [
-    {"keyword": ".net developer", "location": "remote"},
-    {"keyword": "c# developer", "location": "remote"},
-    {"keyword": "dotnet developer", "location": ""},
-    {"keyword": ".net core developer", "location": ""},
-    {"keyword": "asp.net developer", "location": ""},
-    {"keyword": "angular developer", "location": "remote"},
-    {"keyword": "full stack .net", "location": ""},
-    {"keyword": "microservices c#", "location": ""},
-    {"keyword": ".net developer", "location": "pune"},
-    {"keyword": ".net developer", "location": "bangalore"},
-    {"keyword": ".net developer", "location": "hyderabad"},
-    {"keyword": "c# developer", "location": "mumbai"},
+_SHINE_SLUGS = [
+    "dot-net-developer-jobs",
+    "c-sharp-developer-jobs",
+    "dotnet-developer-jobs",
+    "asp-dot-net-developer-jobs",
+    "dot-net-core-developer-jobs",
+    "angular-developer-jobs",
+    "full-stack-dot-net-developer-jobs",
+    "dotnet-developer-work-from-home-jobs",
+    "dot-net-developer-work-from-home-jobs",
+    "microservices-developer-jobs",
+    "azure-developer-jobs",
+    "dot-net-developer-jobs-in-pune",
+    "dot-net-developer-jobs-in-bangalore",
+    "dot-net-developer-jobs-in-hyderabad",
 ]
 
 
-def fetch_naukri() -> list[RawJob]:
-    """Fetch jobs from Naukri.com using their internal search API.
-    This returns JSON and is far more reliable than HTML scraping."""
+def fetch_shine() -> list[RawJob]:
+    """Scrape Shine.com job search pages (server-side rendered HTML)."""
     jobs: list[RawJob] = []
-    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
 
-    for q in _NAUKRI_QUERIES:
+    for slug in _SHINE_SLUGS:
         try:
-            params = {
-                "noOfResults": 50,
-                "urlType": "search_by_keyword",
-                "searchType": "adv",
-                "keyword": q["keyword"],
-                "pageNo": 1,
-                "k": q["keyword"],
-                "suitableJobs": "false",
-                "src": "jobsearchDesk",
-                "latLong": "",
-            }
-            if q["location"]:
-                params["location"] = q["location"]
+            url = f"https://www.shine.com/job-search/{slug}"
+            resp = _session.get(url, headers=_headers(), timeout=20)
+            if resp.status_code != 200:
+                log.warning("shine (%s): HTTP %d", slug, resp.status_code)
+                continue
 
-            headers = {
-                "User-Agent": random.choice(_UA),
-                "Accept": "application/json",
-                "Accept-Language": "en-US,en;q=0.9",
-                "appid": "109",
-                "systemid": "Naukri",
-                "gid": "LOCATION,INDUSTRY,EDUCATION,FAREA_ROLE",
-                "Content-Type": "application/json",
-            }
-            resp = _session.get(_NAUKRI_API, params=params, headers=headers, timeout=20)
+            soup = BeautifulSoup(resp.text, "lxml")
+            cards = soup.select("div.jdbigCard")
 
-            if resp.status_code == 200:
-                data = resp.json()
-                job_details = data.get("jobDetails", [])
-                for item in job_details:
-                    jid = str(item.get("jobId", ""))
-                    if not jid or jid in seen_ids:
-                        continue
-                    seen_ids.add(jid)
+            for card in cards:
+                # URL from meta or title link
+                meta_url = card.select_one('meta[itemprop="url"]')
+                title_link = card.select_one("h3 a[href]")
+                job_url = ""
+                if meta_url and meta_url.get("content"):
+                    job_url = meta_url["content"]
+                elif title_link:
+                    job_url = title_link.get("href", "")
+                    if job_url and not job_url.startswith("http"):
+                        job_url = "https://www.shine.com" + job_url
 
-                    title = item.get("title", "")
-                    company = item.get("companyName", "")
-                    apply_link = item.get("jdURL", "")
-                    if apply_link and not apply_link.startswith("http"):
-                        apply_link = "https://www.naukri.com" + apply_link
+                if not job_url or job_url in seen_urls:
+                    continue
+                seen_urls.add(job_url)
 
-                    # Extract skills from tags
-                    tags = item.get("tagsAndSkills", "") or ""
-                    placeholders = item.get("placeholders", [])
-                    location_parts = []
-                    experience_text = ""
-                    salary_text = ""
-                    for ph in placeholders:
-                        if ph.get("type") == "location":
-                            location_parts.append(ph.get("label", ""))
-                        elif ph.get("type") == "experience":
-                            experience_text = ph.get("label", "")
-                        elif ph.get("type") == "salary":
-                            salary_text = ph.get("label", "")
+                # Title
+                title_el = card.select_one("h3[itemprop='name'] a, h3 a")
+                title = _text(title_el)
+                if not title:
+                    continue
 
-                    location = ", ".join(location_parts) if location_parts else "India"
-                    description = f"{tags} | Experience: {experience_text}" if experience_text else tags
+                # Company
+                company_el = card.select_one(
+                    "span.jdTruncationCompany, "
+                    "span[class*='bigCardTopTitleName']"
+                )
+                company = _text(company_el)
 
-                    if not title or not apply_link:
-                        continue
+                # Location
+                loc_el = card.select_one(
+                    "div[class*='bigCardLocation'] span, "
+                    "div[class*='bigCardCenterListLoc'] span"
+                )
+                location = _text(loc_el) or "India"
 
-                    jobs.append(RawJob(
-                        source="naukri",
-                        external_id=jid,
-                        title=title,
-                        company=company,
-                        location=location,
-                        description=description,
-                        apply_link=apply_link,
-                        posted_at=item.get("footerPlaceholderLabel", ""),
-                        salary_text=salary_text,
-                    ))
-            else:
-                log.warning("naukri API (%s): HTTP %d", q["keyword"], resp.status_code)
+                # Experience
+                exp_el = card.select_one(
+                    "span[class*='bigCardCenterListExp'], "
+                    "div[class*='bigCardExperience'] span"
+                )
+
+                # Skills
+                skill_els = card.select("div.jdSkills li")
+                skills = ", ".join(_text(s) for s in skill_els if _text(s))
+
+                # Posted date
+                posted_el = card.select_one("span[class*='postedData']")
+                posted = _text(posted_el) if posted_el else ""
+
+                # External ID from URL path
+                eid = job_url.rstrip("/").split("/")[-1]
+
+                jobs.append(RawJob(
+                    source="shine",
+                    external_id=eid,
+                    title=title,
+                    company=company,
+                    location=location,
+                    description=skills,
+                    apply_link=job_url,
+                    posted_at=posted,
+                    salary_text=_text(exp_el) if exp_el else "",
+                ))
 
             time.sleep(1.5)
         except Exception as exc:
-            log.warning("naukri (%s): %s", q["keyword"], exc)
+            log.warning("shine (%s): %s", slug, exc)
 
-    log.info("naukri API: fetched %d jobs across %d queries", len(jobs), len(_NAUKRI_QUERIES))
+    log.info("shine: fetched %d jobs across %d slugs", len(jobs), len(_SHINE_SLUGS))
     return jobs
 
 
@@ -447,12 +447,12 @@ def fetch_duckduckgo_jobs() -> list[RawJob]:
 
 
 # ── Exports ──────────────────────────────────────────────────────────────────
-# Active sources: LinkedIn, Naukri (API), Indeed (RSS multi-country), DuckDuckGo
-# Dead (403): SimplyHired, GulfTalent, Bayt, CWJobs, Wellfound, Glassdoor
+# Active sources: LinkedIn, Shine.com (India), Indeed (RSS multi-country), DuckDuckGo
+# Dead/Blocked: Naukri (reCAPTCHA), SimplyHired (403), RemoteOK (403), Wellfound, Glassdoor
 
 SCRAPER_SOURCES = [
     ("linkedin", fetch_linkedin),
-    ("naukri", fetch_naukri),
+    ("shine", fetch_shine),
     ("indeed_rss", fetch_indeed_all),
     ("duckduckgo", fetch_duckduckgo_jobs),
 ]

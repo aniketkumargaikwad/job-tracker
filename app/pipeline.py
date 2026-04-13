@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 
 from app.config import SETTINGS
-from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job, _USE_PG, _cursor, _execute
+from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job, _USE_PG, _cursor, _execute, _fetchall
 from app.emailer import send_email
 from app.enrichment import enrich_job
 from app.scoring import extract_skills, fingerprint, is_likely_duplicate, relevance_score
@@ -21,10 +21,9 @@ log = logging.getLogger(__name__)
 
 def _title_company_pairs() -> list[tuple[str, str]]:
     with _cursor() as cur:
-        _execute(cur, "SELECT title, company FROM jobs")
-        rows = cur.fetchall()
-        return [(r["title"] if isinstance(r, dict) else r["title"],
-                 r["company"] if isinstance(r, dict) else r["company"]) for r in rows]
+        rows = _fetchall(cur, "SELECT title, company FROM jobs")
+        return [(r["title"] if isinstance(r, dict) else r[0],
+                 r["company"] if isinstance(r, dict) else r[1]) for r in rows]
 
 
 def _should_keep(title: str, company: str, score: float) -> bool:
