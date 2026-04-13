@@ -10,7 +10,8 @@ import time
 from datetime import datetime, timezone
 
 from app.config import SETTINGS
-from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job, _USE_PG, _cursor, _execute, _fetchall
+from app.db import fetch_unsent_jobs, fingerprint_exists, get_conn, init_db, insert_job, _cursor, _execute, _fetchall
+import app.db as _db_mod
 from app.emailer import send_email
 from app.enrichment import enrich_job
 from app.scoring import extract_skills, fingerprint, is_likely_duplicate, relevance_score
@@ -41,7 +42,7 @@ def run_pipeline(send_mail: bool = True) -> dict:
     started = datetime.now(timezone.utc).isoformat()
 
     # Insert run log entry
-    if _USE_PG:
+    if _db_mod._USE_PG:
         import psycopg2
         conn = get_conn()
         try:

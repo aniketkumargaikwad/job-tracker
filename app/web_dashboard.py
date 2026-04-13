@@ -32,7 +32,6 @@ from app.db import (
     _execute,
     _fetchall,
     _fetchone,
-    _USE_PG,
 )
 
 app = Flask(__name__)
@@ -235,7 +234,7 @@ def _jobs_table(rows: list[dict]) -> str:
     if not rows:
         return """<div class="empty-state">
             <div class="icon">&#128270;</div>
-            <p>No jobs found in this period. The pipeline runs daily at 07:00 IST.</p>
+            <p>No jobs found matching your filters. Try broadening your search.</p>
         </div>"""
 
     job_rows = ""
@@ -243,6 +242,7 @@ def _jobs_table(rows: list[dict]) -> str:
         mnc = '<span class="check">Yes</span>' if r.get("is_mnc") else '<span class="cross">-</span>'
         prod = '<span class="check">Yes</span>' if r.get("is_product_based") else '<span class="cross">-</span>'
         cities = _esc(r.get("indian_cities_csv")) if r.get("indian_cities_csv") else "-"
+        exp = _esc(r.get("experience", "")) or "-"
         job_rows += f"""<tr>
           <td>{r['id']}</td>
           <td class="title-cell"><strong>{_esc(r.get('title',''))}</strong><br>
@@ -252,6 +252,7 @@ def _jobs_table(rows: list[dict]) -> str:
           <td>{mnc}</td><td>{prod}</td>
           <td style="font-size:11px;">{cities}</td>
           <td style="font-size:12px;">{_esc(r.get('salary',''))}</td>
+          <td style="font-size:12px;white-space:nowrap;">{exp}</td>
           <td>{_score_badge(r.get('relevance_score', 0))}</td>
           <td>{_status_badge(r.get('status', 'not_applied'))}</td>
           <td>
@@ -260,13 +261,90 @@ def _jobs_table(rows: list[dict]) -> str:
           </td>
         </tr>"""
 
-    return f"""<table>
+    return f"""<table id="jobsTable">
       <thead><tr>
         <th>#</th><th>Title / Source</th><th>Company</th><th>Skills</th><th>MNC</th><th>Prod</th>
-        <th>Cities</th><th>Salary</th><th>Score</th><th>Status</th><th>Action</th>
+        <th>Cities</th><th>Salary</th><th>Exp</th><th>Score</th><th>Status</th><th>Action</th>
       </tr></thead>
       <tbody>{job_rows}</tbody>
     </table>"""
+
+
+_FILTER_CSS = """
+<style>
+  .filter-bar { display:flex; gap:10px; margin:12px 0; flex-wrap:wrap; align-items:flex-end; }
+  .filter-group { display:flex; flex-direction:column; }
+  .filter-group label { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+  .filter-group select, .filter-group input {
+    background:var(--card); border:1px solid var(--border); border-radius:5px;
+    color:var(--text); padding:6px 10px; font-size:12px; min-width:110px;
+  }
+  .filter-group select:focus, .filter-group input:focus { outline:none; border-color:var(--green); }
+  .filter-group .small-input { min-width:60px; max-width:70px; }
+  .filter-btn {
+    background:var(--dim-green); color:var(--bright); border:none; border-radius:5px;
+    padding:6px 16px; font-size:12px; font-weight:600; cursor:pointer; height:32px;
+  }
+  .filter-btn:hover { background:var(--green); }
+  .filter-btn.secondary { background:transparent; border:1px solid var(--border); color:var(--dim); }
+  .filter-btn.secondary:hover { color:var(--text); border-color:var(--dim); }
+</style>
+"""
+
+
+def _filter_bar(period: str, query: str, filters: dict) -> str:
+    """Build the filter controls HTML."""
+    mnc_opts = "".join(
+        f'<option value="{v}" {"selected" if filters.get("mnc") == v else ""}>{l}</option>'
+        for v, l in [("", "All"), ("yes", "Yes"), ("no", "No")]
+    )
+    prod_opts = "".join(
+        f'<option value="{v}" {"selected" if filters.get("prod") == v else ""}>{l}</option>'
+        for v, l in [("", "All"), ("yes", "Yes"), ("no", "No")]
+    )
+    status_opts = "".join(
+        f'<option value="{v}" {"selected" if filters.get("status") == v else ""}>{l}</option>'
+        for v, l in [("", "All"), ("not_applied", "Not Applied"), ("applied", "Applied"), ("emailed", "Emailed")]
+    )
+
+    return f"""{_FILTER_CSS}
+    <form method="get" action="/jobs/{period}" class="filter-bar">
+      <div class="filter-group" style="flex:2;">
+        <label>Search</label>
+        <input name="q" value="{_esc(query)}" placeholder="Title, company, skills..." style="min-width:200px;">
+      </div>
+      <div class="filter-group">
+        <label>Skills</label>
+        <input name="skill" value="{_esc(filters.get('skill',''))}" placeholder="e.g. angular">
+      </div>
+      <div class="filter-group">
+        <label>MNC</label>
+        <select name="mnc">{mnc_opts}</select>
+      </div>
+      <div class="filter-group">
+        <label>Product</label>
+        <select name="prod">{prod_opts}</select>
+      </div>
+      <div class="filter-group">
+        <label>Status</label>
+        <select name="status">{status_opts}</select>
+      </div>
+      <div class="filter-group">
+        <label>Score</label>
+        <div style="display:flex;gap:4px;">
+          <input class="small-input" name="score_min" type="number" min="0" max="100"
+                 value="{_esc(filters.get('score_min',''))}" placeholder="Min">
+          <input class="small-input" name="score_max" type="number" min="0" max="100"
+                 value="{_esc(filters.get('score_max',''))}" placeholder="Max">
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Exp (Yrs)</label>
+        <input name="exp" value="{_esc(filters.get('exp',''))}" placeholder="e.g. 5" style="min-width:60px;max-width:80px;">
+      </div>
+      <button type="submit" class="filter-btn">Filter</button>
+      <a href="/jobs/{period}" class="filter-btn secondary" style="text-decoration:none;line-height:20px;">Clear</a>
+    </form>"""
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -282,8 +360,68 @@ def jobs_page(period: str):
         return redirect("/jobs/today")
 
     init_db()
-    query = request.args.get("q", "")
+    query = request.args.get("q", "").strip()
+
+    # Collect filters
+    filters = {
+        "skill": request.args.get("skill", "").strip(),
+        "mnc": request.args.get("mnc", "").strip(),
+        "prod": request.args.get("prod", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "score_min": request.args.get("score_min", "").strip(),
+        "score_max": request.args.get("score_max", "").strip(),
+        "exp": request.args.get("exp", "").strip(),
+    }
+
     rows = fetch_jobs_by_date(period, query, limit=500)
+
+    # Apply client-side filters on the fetched rows
+    filtered = rows
+    if filters["skill"]:
+        sk = filters["skill"].lower()
+        filtered = [r for r in filtered if sk in (r.get("skills_csv") or "").lower()
+                     or sk in (r.get("description") or "").lower()
+                     or sk in (r.get("title") or "").lower()]
+    if filters["mnc"] == "yes":
+        filtered = [r for r in filtered if r.get("is_mnc")]
+    elif filters["mnc"] == "no":
+        filtered = [r for r in filtered if not r.get("is_mnc")]
+    if filters["prod"] == "yes":
+        filtered = [r for r in filtered if r.get("is_product_based")]
+    elif filters["prod"] == "no":
+        filtered = [r for r in filtered if not r.get("is_product_based")]
+    if filters["status"]:
+        filtered = [r for r in filtered if r.get("status") == filters["status"]]
+    if filters["score_min"]:
+        try:
+            mn = float(filters["score_min"])
+            filtered = [r for r in filtered if float(r.get("relevance_score", 0)) >= mn]
+        except ValueError:
+            pass
+    if filters["score_max"]:
+        try:
+            mx = float(filters["score_max"])
+            filtered = [r for r in filtered if float(r.get("relevance_score", 0)) <= mx]
+        except ValueError:
+            pass
+    if filters["exp"]:
+        try:
+            target_exp = int(filters["exp"])
+            def _exp_match(r):
+                exp_text = r.get("experience", "") or ""
+                import re as _re
+                m = _re.search(r"(\d+)\s*(?:to|-)\s*(\d+)", exp_text)
+                if m:
+                    lo, hi = int(m.group(1)), int(m.group(2))
+                    return lo <= target_exp <= hi
+                m2 = _re.search(r"(\d+)\+?\s*(?:yr|year)", exp_text, _re.I)
+                if m2:
+                    return target_exp >= int(m2.group(1))
+                return True  # No exp data — don't filter out
+            filtered = [r for r in filtered if _exp_match(r)]
+        except ValueError:
+            pass
+
     s = fetch_stats()
     counts = fetch_date_counts()
 
@@ -294,6 +432,8 @@ def jobs_page(period: str):
         "older": "Jobs fetched before yesterday",
     }
 
+    active_count = sum(1 for v in filters.values() if v)
+
     stats_html = f"""<div class="stat-row">
       <div class="stat-card"><div class="stat-num">{counts['today']}</div><div class="stat-label">Today</div></div>
       <div class="stat-card"><div class="stat-num">{counts['yesterday']}</div><div class="stat-label">Yesterday</div></div>
@@ -303,16 +443,15 @@ def jobs_page(period: str):
       <div class="stat-card"><div class="stat-num">{s['applied']}</div><div class="stat-label">Applied</div></div>
     </div>"""
 
+    filter_note = f' ({active_count} filter{"s" if active_count != 1 else ""} active)' if active_count else ""
+
     body = f"""
     <h1>{labels[period]}</h1>
-    <p class="subtitle">{descs[period]} — {len(rows)} jobs
+    <p class="subtitle">{descs[period]} — {len(filtered)} jobs{filter_note}
     {f' matching "<strong>{_esc(query)}</strong>"' if query else ''}</p>
     {stats_html}
-    <form method="get" action="/jobs/{period}">
-      <input class="search-bar" name="q" value="{_esc(query)}"
-             placeholder="Search jobs by title, company, or skills...">
-    </form>
-    {_jobs_table(rows)}"""
+    {_filter_bar(period, query, filters)}
+    {_jobs_table(filtered)}"""
 
     return _page(labels[period], period, body)
 

@@ -15,6 +15,7 @@ class RawJob:
     apply_link: str
     posted_at: str = ""
     salary_text: str = ""
+    experience: str = ""
 
     def is_valid(self) -> bool:
         """Check minimum required fields are present."""
@@ -35,6 +36,7 @@ class EnrichedJob:
     is_product_based: bool
     indian_cities: list[str]
     salary: str
+    experience: str
     relevance_score: float
     fingerprint: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

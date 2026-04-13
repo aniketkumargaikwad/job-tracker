@@ -6,7 +6,7 @@ import pytest
 from app.enrichment import (
     _detect_indian_cities,
     _extract_salary_from_text,
-    _heuristic_salary,
+    _heuristic_salary_inr,
     enrich_job,
     infer_salary,
     KNOWN_MNC,
@@ -51,36 +51,36 @@ class TestExtractSalaryFromText:
 
 class TestHeuristicSalary:
     def test_senior_india(self):
-        result = _heuristic_salary("Senior .NET Developer", "Microsoft", "Bengaluru, India")
-        assert "22-45 LPA" in result or "estimated" in result.lower()
+        result = _heuristic_salary_inr("Senior .NET Developer", "Microsoft", "Bengaluru, India")
+        assert "LPA" in result and "₹" in result
 
     def test_junior_us(self):
-        result = _heuristic_salary("Junior Developer", "Google", "New York, USA")
-        assert "$" in result
+        result = _heuristic_salary_inr("Junior Developer", "Google", "New York, USA")
+        assert "₹" in result and "LPA" in result
 
     def test_mid_uk(self):
-        result = _heuristic_salary(".NET Developer", "Acme", "London, UK")
-        assert "£" in result
+        result = _heuristic_salary_inr(".NET Developer", "Acme", "London, UK")
+        assert "₹" in result and "LPA" in result
 
     def test_mid_gulf(self):
-        result = _heuristic_salary(".NET Developer", "Acme", "Dubai, UAE")
-        assert "AED" in result
+        result = _heuristic_salary_inr(".NET Developer", "Acme", "Dubai, UAE")
+        assert "₹" in result and "LPA" in result
 
     def test_senior_eu(self):
-        result = _heuristic_salary("Lead Developer", "SAP", "Berlin, Germany")
-        assert "€" in result
+        result = _heuristic_salary_inr("Lead Developer", "SAP", "Berlin, Germany")
+        assert "₹" in result and "LPA" in result
 
     def test_product_company_note(self):
-        result = _heuristic_salary("Developer", "google", "Remote")
-        assert "Product" in result or "estimated" in result.lower()
+        result = _heuristic_salary_inr("Developer", "google", "Remote")
+        assert "est." in result
 
     def test_mnc_note(self):
-        result = _heuristic_salary("Developer", "accenture", "Hyderabad, India")
-        assert "MNC" in result or "estimated" in result.lower()
+        result = _heuristic_salary_inr("Developer", "accenture", "Hyderabad, India")
+        assert "est." in result
 
     def test_unknown_region(self):
-        result = _heuristic_salary("Developer", "Acme", "Mars")
-        assert "estimated" in result.lower()
+        result = _heuristic_salary_inr("Developer", "Acme", "Mars")
+        assert "est." in result
 
 
 class TestDetectIndianCities:
@@ -132,14 +132,14 @@ class TestInferSalary:
         raw = RawJob("src", "1", "Senior .NET Developer", "Acme Corp", "Bengaluru, India",
                       "Great opportunity to work with cutting edge tech", "https://x.com")
         result = infer_salary(raw)
-        assert "estimated" in result.lower()
+        assert "est." in result
 
     @patch("app.enrichment._research_salary", return_value="$90K-$130K (web research)")
     def test_web_research_fallback(self, mock_research):
         raw = RawJob("src", "1", "Dev", "Co", "Remote",
                       "Join our amazing team!", "https://x.com")
         result = infer_salary(raw, web_research=True)
-        assert "web research" in result.lower()
+        assert "₹" in result and "LPA" in result
 
 
 class TestEnrichJob:

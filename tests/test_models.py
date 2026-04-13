@@ -45,8 +45,8 @@ class TestEnrichedJob:
             source="s", external_id="1", title="T", company="C",
             location="L", description="D", apply_link="https://x.com",
             skills=["c#"], is_mnc=True, is_product_based=False,
-            indian_cities=["Pune"], salary="10LPA", relevance_score=50.0,
-            fingerprint="abc123",
+            indian_cities=["Pune"], salary="10LPA", experience="",
+            relevance_score=50.0, fingerprint="abc123",
         )
         assert isinstance(job.created_at, datetime)
         assert job.is_mnc is True
@@ -58,8 +58,8 @@ class TestEnrichedJob:
             source="s", external_id="1", title="T", company="C",
             location="L", description="D", apply_link="https://x.com",
             skills=[], is_mnc=False, is_product_based=False,
-            indian_cities=[], salary="", relevance_score=0.0,
-            fingerprint="fp",
+            indian_cities=[], salary="", experience="",
+            relevance_score=0.0, fingerprint="fp",
         )
         after = datetime.now(timezone.utc)
         assert before <= job.created_at <= after
@@ -70,7 +70,7 @@ class TestEnrichedJob:
             source="s", external_id="1", title="T", company="C",
             location="L", description="D", apply_link="https://x.com",
             skills=[], is_mnc=False, is_product_based=False,
-            indian_cities=[], salary="", relevance_score=0.0,
-            fingerprint="fp", created_at=custom,
+            indian_cities=[], salary="", experience="",
+            relevance_score=0.0, fingerprint="fp", created_at=custom,
         )
         assert job.created_at == custom

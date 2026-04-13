@@ -73,6 +73,7 @@ def make_enriched_job():
             "is_product_based": False,
             "indian_cities": [],
             "salary": "₹15-25 LPA",
+            "experience": "",
             "relevance_score": 75.0,
             "fingerprint": f"fp_{_counter}_{_counter * 7}",
             "created_at": datetime.now(timezone.utc),

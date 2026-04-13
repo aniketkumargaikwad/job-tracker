@@ -24,8 +24,13 @@ _db_path_override: Optional[str] = None
 
 def set_db_path(path: Optional[str]) -> None:
     """Override the database path (SQLite only). Use None to reset."""
-    global _db_path_override
+    global _db_path_override, _USE_PG
     _db_path_override = path
+    # When overriding path, force SQLite mode (for tests)
+    if path is not None:
+        _USE_PG = False
+    else:
+        _USE_PG = DATABASE_URL.startswith("postgres")
 
 
 # ── Connection helpers ───────────────────────────────────────────────────────
@@ -109,6 +114,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     is_product_based INTEGER NOT NULL,
     indian_cities_csv TEXT NOT NULL,
     salary TEXT NOT NULL,
+    experience TEXT NOT NULL DEFAULT '',
     relevance_score REAL NOT NULL,
     fingerprint TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'not_applied',
@@ -158,6 +164,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     is_product_based INTEGER NOT NULL,
     indian_cities_csv TEXT NOT NULL,
     salary TEXT NOT NULL,
+    experience TEXT NOT NULL DEFAULT '',
     relevance_score REAL NOT NULL,
     fingerprint TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'not_applied',
@@ -199,6 +206,13 @@ def init_db() -> None:
         try:
             cur = conn.cursor()
             cur.execute(_PG_SCHEMA)
+            # Migration: add experience column if missing
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE jobs ADD COLUMN experience TEXT NOT NULL DEFAULT '';
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """)
             conn.commit()
             cur.close()
         finally:
@@ -207,7 +221,12 @@ def init_db() -> None:
         conn = _sqlite_conn()
         try:
             conn.executescript(_SQLITE_SCHEMA)
-            conn.commit()
+            # Migration: add experience column if missing
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN experience TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+            except Exception:
+                pass  # column already exists
         finally:
             conn.close()
 
@@ -261,8 +280,8 @@ def insert_job(job: EnrichedJob) -> int:
         INSERT INTO jobs (
             source, external_id, title, company, location, description, apply_link,
             skills_csv, is_mnc, is_product_based, indian_cities_csv, salary,
-            relevance_score, fingerprint, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            experience, relevance_score, fingerprint, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     params = (
         job.source,
@@ -277,6 +296,7 @@ def insert_job(job: EnrichedJob) -> int:
         int(job.is_product_based),
         ",".join(job.indian_cities),
         job.salary,
+        job.experience,
         job.relevance_score,
         job.fingerprint,
         job.created_at.isoformat(),

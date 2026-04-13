@@ -209,7 +209,8 @@ def fetch_shine() -> list[RawJob]:
                     description=skills,
                     apply_link=job_url,
                     posted_at=posted,
-                    salary_text=_text(exp_el) if exp_el else "",
+                    salary_text="",
+                    experience=_text(exp_el) if exp_el else "",
                 ))
 
             time.sleep(1.5)
