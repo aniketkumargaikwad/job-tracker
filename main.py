@@ -4,8 +4,6 @@ import argparse
 import json
 import logging
 
-from app.auto_apply import apply_to_job
-from app.dashboard import run_dashboard
 from app.pipeline import run_pipeline
 from app.web_dashboard import run_web_dashboard
 
@@ -68,15 +66,12 @@ def _print_summary(result: dict) -> None:
 
 
 def cli() -> None:
-    parser = argparse.ArgumentParser(description="Remote job automation system")
+    parser = argparse.ArgumentParser(description="Remote job automation system (cloud-first)")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", help="Fetch/filter/dedupe/enrich/send email")
     sub.add_parser("run-no-email", help="Fetch/filter/dedupe/enrich only (no email)")
-    sub.add_parser("dashboard", help="Open terminal (TUI) dashboard")
-    sub.add_parser("web", help="Start web dashboard (http://localhost:5000)")
-    apply_cmd = sub.add_parser("apply", help="Auto-apply for one job")
-    apply_cmd.add_argument("--job-id", type=int, required=True)
-    sub.add_parser("json", help="Run pipeline and output raw JSON (for scripting)")
+    sub.add_parser("web", help="Start web dashboard")
+    sub.add_parser("json", help="Run pipeline and output raw JSON")
     args = parser.parse_args()
 
     if args.command == "run":
@@ -87,14 +82,10 @@ def cli() -> None:
         _print_summary(result)
     elif args.command == "json":
         result = run_pipeline(send_mail=False)
-        del result["jobs"]  # strip large payload for JSON mode
+        del result["jobs"]
         print(json.dumps(result, indent=2))
-    elif args.command == "dashboard":
-        run_dashboard()
     elif args.command == "web":
         run_web_dashboard()
-    elif args.command == "apply":
-        print(apply_to_job(args.job_id))
     else:
         parser.print_help()
 

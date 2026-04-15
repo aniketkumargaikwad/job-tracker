@@ -52,10 +52,6 @@ class TestSettings:
         with pytest.raises(AttributeError):
             s.email_host = "changed"  # type: ignore[misc]
 
-    def test_settings_db_path_default(self):
-        s = Settings()
-        assert str(s.db_path).endswith("jobs.db")
-
     def test_settings_email_port_default(self):
         s = Settings()
         assert s.email_port == 587
@@ -82,4 +78,3 @@ class TestUserProfile:
     def test_profile_defaults(self):
         p = UserProfile()
         assert p.experience_years == "5"
-        assert p.resume_path == "data/resume.pdf"

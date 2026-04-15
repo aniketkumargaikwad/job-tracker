@@ -81,13 +81,15 @@ def _fill_common_fields(page, selectors: dict[str, str]) -> None:
 
 
 def _upload_resume(page, selector: str) -> None:
-    """Upload resume if file exists."""
-    resume = Path(PROFILE.resume_path)
-    if resume.is_file():
-        try:
-            page.set_input_files(selector, str(resume))
-        except Exception:
-            pass
+    """Upload resume if file exists (local-only; requires Playwright)."""
+    resume_path = os.getenv("PROFILE_RESUME_PATH", "")
+    if resume_path:
+        resume = Path(resume_path)
+        if resume.is_file():
+            try:
+                page.set_input_files(selector, str(resume))
+            except Exception:
+                pass
 
 
 # ── Portal Adapters ─────────────────────────────────────────────────────────

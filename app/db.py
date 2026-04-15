@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from app.config import SETTINGS
 from app.models import EnrichedJob
 
 # ── Backend detection ────────────────────────────────────────────────────────
@@ -51,7 +50,7 @@ def _pg_conn():
 
 
 def _sqlite_conn():
-    db_path = _db_path_override or str(SETTINGS.db_path)
+    db_path = _db_path_override or ":memory:"
     if db_path != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)

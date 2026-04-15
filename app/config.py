@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,9 +19,6 @@ def _env(name: str, default: str = "") -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    # Database
-    db_path: Path = Path("data/jobs.db")
-
     # SMTP
     email_host: str = _env("SMTP_HOST")
     email_port: int = int(_env("SMTP_PORT", "587"))
@@ -67,8 +63,6 @@ class UserProfile:
     current_title: str = _env("PROFILE_CURRENT_TITLE")
     linkedin: str = _env("PROFILE_LINKEDIN")
     github: str = _env("PROFILE_GITHUB")
-    resume_path: str = _env("PROFILE_RESUME_PATH", "data/resume.pdf")
-    cover_letter_path: str = _env("PROFILE_COVER_LETTER_PATH", "data/cover_letter.txt")
     skills: str = _env("PROFILE_SKILLS")
     current_company: str = _env("PROFILE_CURRENT_COMPANY")
     current_salary: str = _env("PROFILE_CURRENT_SALARY")
