@@ -11,6 +11,7 @@ Routes:
   /apply/<id>              – Redirect to portal (Quick Apply)
   /mark-applied/<id>       – Mark a job as manually applied
   /api/jobs                – JSON API for jobs
+  /health                  – Health check (wake-up ping for cron)
   /api/trigger-run         – Trigger a pipeline run (GET/POST)
 """
 from __future__ import annotations
@@ -620,6 +621,12 @@ def api_jobs():
     period = request.args.get("period", "today")
     rows = fetch_jobs_by_date(period, query, limit=200)
     return jsonify(rows)
+
+
+@app.route("/health")
+def health():
+    """Lightweight health check — used by cron-job.org to wake Render."""
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/trigger-run", methods=["GET", "POST"])
