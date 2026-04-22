@@ -221,6 +221,16 @@ def init_db() -> None:
                 EXCEPTION WHEN duplicate_column THEN NULL;
                 END $$;
             """)
+            # One-time fix: clear false "emailed" records from when send_email
+            # silently skipped but pipeline still marked jobs as emailed.
+            # Only runs once — after this, email_count tracking prevents re-marking.
+            cur.execute("""
+                DELETE FROM applications
+                WHERE status = 'emailed'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM run_log WHERE email_count > 0
+                  )
+            """)
             conn.commit()
             cur.close()
         finally:

@@ -90,9 +90,10 @@ def build_html(rows: list[dict]) -> str:
 </html>"""
 
 
-def send_email(rows: list[dict]) -> None:
+def send_email(rows: list[dict]) -> bool:
+    """Send email digest. Returns True if email was actually sent."""
     if not rows or not SETTINGS.email_host:
-        return
+        return False
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"[{len(rows)} Jobs] Daily Remote .NET Digest — {datetime.now().strftime('%b %d')}"
     msg["From"] = SETTINGS.email_from
@@ -103,3 +104,4 @@ def send_email(rows: list[dict]) -> None:
         server.starttls()
         server.login(SETTINGS.email_user, SETTINGS.email_password)
         server.sendmail(SETTINGS.email_from, [SETTINGS.email_to], msg.as_string())
+    return True

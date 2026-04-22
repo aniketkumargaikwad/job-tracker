@@ -199,15 +199,19 @@ def run_pipeline(send_mail: bool = True) -> dict:
     email_error = ""
     if send_mail and digest:
         try:
-            send_email(digest)
-            email_count = len(digest)
-            log.info("Email sent with %d jobs", email_count)
-            with _cursor() as cur:
-                for row in digest:
-                    _execute(cur,
-                        "INSERT INTO applications(job_id, portal, status, details, attempted_at) VALUES (?, ?, ?, ?, ?)",
-                        (row["job_id"], "email_digest", "emailed", "", datetime.now(timezone.utc).isoformat()),
-                    )
+            sent = send_email(digest)
+            if sent:
+                email_count = len(digest)
+                log.info("Email sent with %d jobs", email_count)
+                with _cursor() as cur:
+                    for row in digest:
+                        _execute(cur,
+                            "INSERT INTO applications(job_id, portal, status, details, attempted_at) VALUES (?, ?, ?, ?, ?)",
+                            (row["job_id"], "email_digest", "emailed", "", datetime.now(timezone.utc).isoformat()),
+                        )
+            else:
+                email_error = "SMTP not configured"
+                log.warning("SMTP not configured — %d jobs NOT emailed", len(digest))
         except Exception as exc:
             email_error = str(exc)
             log.error("Email send failed: %s", exc)
