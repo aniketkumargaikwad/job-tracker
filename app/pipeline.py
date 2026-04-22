@@ -195,10 +195,13 @@ def run_pipeline(send_mail: bool = True) -> dict:
         )
 
     # 5. Send email digest
+    email_count = 0
+    email_error = ""
     if send_mail and digest:
         try:
             send_email(digest)
-            log.info("Email sent with %d jobs", len(digest))
+            email_count = len(digest)
+            log.info("Email sent with %d jobs", email_count)
             with _cursor() as cur:
                 for row in digest:
                     _execute(cur,
@@ -206,15 +209,20 @@ def run_pipeline(send_mail: bool = True) -> dict:
                         (row["job_id"], "email_digest", "emailed", "", datetime.now(timezone.utc).isoformat()),
                     )
         except Exception as exc:
+            email_error = str(exc)
             log.error("Email send failed: %s", exc)
+    elif send_mail and not digest:
+        log.info("No unsent jobs to email")
 
     # 6. Update run log
     t_total = time.monotonic() - t0
+    stats_str = f"dup={skipped_dup},not_remote={skipped_not_remote},filtered={skipped_filter},invalid={skipped_invalid}"
+    if email_error:
+        stats_str += f",email_error={email_error}"
     with _cursor() as cur:
         _execute(cur,
-            "UPDATE run_log SET finished_at = ?, fetched_count = ?, stored_count = ?, source_stats = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), len(raw_jobs), saved,
-             f"dup={skipped_dup},not_remote={skipped_not_remote},filtered={skipped_filter},invalid={skipped_invalid}", run_id),
+            "UPDATE run_log SET finished_at = ?, fetched_count = ?, stored_count = ?, email_count = ?, source_stats = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), len(raw_jobs), saved, email_count, stats_str, run_id),
         )
 
     result = {

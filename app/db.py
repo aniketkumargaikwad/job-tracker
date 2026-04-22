@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS run_log (
     finished_at TEXT,
     fetched_count INTEGER NOT NULL DEFAULT 0,
     stored_count INTEGER NOT NULL DEFAULT 0,
+    email_count INTEGER NOT NULL DEFAULT 0,
     source_stats TEXT NOT NULL DEFAULT '',
     errors TEXT NOT NULL DEFAULT ''
 );
@@ -180,6 +181,7 @@ CREATE TABLE IF NOT EXISTS run_log (
     finished_at TEXT,
     fetched_count INTEGER NOT NULL DEFAULT 0,
     stored_count INTEGER NOT NULL DEFAULT 0,
+    email_count INTEGER NOT NULL DEFAULT 0,
     source_stats TEXT NOT NULL DEFAULT '',
     errors TEXT NOT NULL DEFAULT ''
 );
@@ -212,6 +214,13 @@ def init_db() -> None:
                 EXCEPTION WHEN duplicate_column THEN NULL;
                 END $$;
             """)
+            # Migration: add email_count column to run_log if missing
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE run_log ADD COLUMN email_count INTEGER NOT NULL DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """)
             conn.commit()
             cur.close()
         finally:
@@ -226,6 +235,12 @@ def init_db() -> None:
                 conn.commit()
             except Exception:
                 pass  # column already exists
+            # Migration: add email_count column to run_log if missing
+            try:
+                conn.execute("ALTER TABLE run_log ADD COLUMN email_count INTEGER NOT NULL DEFAULT 0")
+                conn.commit()
+            except Exception:
+                pass
         finally:
             conn.close()
 

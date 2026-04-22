@@ -109,5 +109,8 @@ class TestApiTriggerRun:
     def test_trigger_returns_json(self, client):
         resp = client.get("/api/trigger-run")
         assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "started"
+        # Streaming ndjson — first line is {"status": "started"}
+        import json
+        lines = [l for l in resp.data.decode().strip().splitlines() if l.strip()]
+        first = json.loads(lines[0])
+        assert first["status"] == "started"

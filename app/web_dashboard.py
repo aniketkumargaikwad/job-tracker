@@ -17,10 +17,11 @@ Routes:
 from __future__ import annotations
 
 import html as html_mod
+import json
 import threading
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, redirect, request, url_for
+from flask import Flask, Response, jsonify, redirect, request, url_for
 
 from app.config import SETTINGS
 from app.db import (
@@ -590,11 +591,16 @@ def runs_page():
             except Exception:
                 pass
 
+        email_count = r.get('email_count', 0) or 0
+        email_badge = (f'<span style="color:var(--green);font-weight:600;">{email_count}</span>'
+                       if email_count else '<span style="color:var(--dim);">0</span>')
+
         run_rows += f"""<tr>
           <td style="font-weight:600;">#{r.get('id','')}</td>
           <td>{started}</td><td>{finished}</td><td>{duration}</td>
           <td style="font-weight:600;">{r.get('fetched_count',0)}</td>
           <td style="font-weight:600;color:var(--green);">{r.get('stored_count',0)}</td>
+          <td>{email_badge}</td>
           <td style="font-size:11px;">{stats_detail}</td>
           <td style="font-size:11px;color:var(--red);">{errors}</td>
         </tr>"""
@@ -605,7 +611,7 @@ def runs_page():
     <table>
       <thead><tr>
         <th>Run</th><th>Started</th><th>Finished</th><th>Duration</th>
-        <th>Fetched</th><th>Saved</th><th>Stats</th><th>Errors</th>
+        <th>Fetched</th><th>Saved</th><th>Emailed</th><th>Stats</th><th>Errors</th>
       </tr></thead>
       <tbody>{run_rows}</tbody>
     </table>"""
@@ -631,14 +637,62 @@ def health():
 
 @app.route("/api/trigger-run", methods=["GET", "POST"])
 def api_trigger_run():
-    """Trigger a pipeline run in the background. Accepts GET and POST."""
-    def _bg_run():
-        from app.pipeline import run_pipeline
-        run_pipeline(send_mail=True)
+    """Run pipeline with streaming keepalive to survive cold starts.
 
-    thread = threading.Thread(target=_bg_run, daemon=True)
-    thread.start()
-    return jsonify({"status": "started", "message": "Pipeline run triggered in background"})
+    Sends a JSON line every 15s so Render proxy / cron-job.org never
+    time out while the pipeline (5-7 min) is running.
+    """
+    def generate():
+        yield json.dumps({"status": "started"}) + "\n"
+
+        result = {}
+        error = None
+        done = threading.Event()
+
+        def _run():
+            nonlocal result, error
+            try:
+                from app.pipeline import run_pipeline
+                result = run_pipeline(send_mail=True)
+            except Exception as e:
+                error = str(e)
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=_run)
+        thread.start()
+
+        # Send keepalive every 15s to prevent proxy/client timeouts
+        while not done.wait(timeout=15):
+            yield json.dumps({"status": "running"}) + "\n"
+
+        if error:
+            yield json.dumps({"status": "error", "error": error}) + "\n"
+        else:
+            yield json.dumps({"status": "completed", **result}) + "\n"
+
+    return Response(generate(), mimetype="application/x-ndjson")
+
+
+@app.route("/api/status")
+def api_status():
+    """Diagnostic endpoint — check SMTP config, DB, last run."""
+    from app.config import SETTINGS
+    with _cursor() as cur:
+        last_run = _fetchone(cur, "SELECT * FROM run_log ORDER BY id DESC LIMIT 1")
+        job_count = _fetchone(cur, "SELECT COUNT(*) AS cnt FROM jobs")
+    job_count = job_count["cnt"] if isinstance(job_count, dict) else job_count[0] if job_count else 0
+    lr = {}
+    if last_run:
+        lr = dict(last_run) if not isinstance(last_run, dict) else last_run
+    return jsonify({
+        "smtp_configured": bool(SETTINGS.email_host and SETTINGS.email_user and SETTINGS.email_password),
+        "smtp_host": SETTINGS.email_host or "(not set)",
+        "email_to": SETTINGS.email_to or "(not set)",
+        "db_connected": True,
+        "total_jobs": job_count,
+        "last_run": lr,
+    })
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
