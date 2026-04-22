@@ -12,5 +12,7 @@ services:
         value: "0.0.0.0"
       - key: DASHBOARD_PORT
         value: "10000"
+      - key: DASHBOARD_URL
+        value: "https://job-tracker-wm9w.onrender.com"
       - key: DATABASE_URL
         sync: false
