@@ -635,41 +635,52 @@ def health():
     return jsonify({"status": "ok"})
 
 
+# Concurrency guard — prevent overlapping pipeline runs
+_pipeline_lock = threading.Lock()
+
+
 @app.route("/api/trigger-run", methods=["GET", "POST"])
 def api_trigger_run():
     """Run pipeline with streaming keepalive to survive cold starts.
 
     Sends a JSON line every 15s so Render proxy / cron-job.org never
     time out while the pipeline (5-7 min) is running.
+    Rejects concurrent runs to prevent duplicate emails.
     """
+    if not _pipeline_lock.acquire(blocking=False):
+        return jsonify({"status": "skipped", "message": "Pipeline already running"}), 409
+
     def generate():
-        yield json.dumps({"status": "started"}) + "\n"
+        try:
+            yield json.dumps({"status": "started"}) + "\n"
 
-        result = {}
-        error = None
-        done = threading.Event()
+            result = {}
+            error = None
+            done = threading.Event()
 
-        def _run():
-            nonlocal result, error
-            try:
-                from app.pipeline import run_pipeline
-                result = run_pipeline(send_mail=True)
-            except Exception as e:
-                error = str(e)
-            finally:
-                done.set()
+            def _run():
+                nonlocal result, error
+                try:
+                    from app.pipeline import run_pipeline
+                    result = run_pipeline(send_mail=True)
+                except Exception as e:
+                    error = str(e)
+                finally:
+                    done.set()
 
-        thread = threading.Thread(target=_run)
-        thread.start()
+            thread = threading.Thread(target=_run)
+            thread.start()
 
-        # Send keepalive every 15s to prevent proxy/client timeouts
-        while not done.wait(timeout=15):
-            yield json.dumps({"status": "running"}) + "\n"
+            # Send keepalive every 15s to prevent proxy/client timeouts
+            while not done.wait(timeout=15):
+                yield json.dumps({"status": "running"}) + "\n"
 
-        if error:
-            yield json.dumps({"status": "error", "error": error}) + "\n"
-        else:
-            yield json.dumps({"status": "completed", **result}) + "\n"
+            if error:
+                yield json.dumps({"status": "error", "error": error}) + "\n"
+            else:
+                yield json.dumps({"status": "completed", **result}) + "\n"
+        finally:
+            _pipeline_lock.release()
 
     return Response(generate(), mimetype="application/x-ndjson")
 
