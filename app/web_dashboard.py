@@ -17,11 +17,10 @@ Routes:
 from __future__ import annotations
 
 import html as html_mod
-import json
 import threading
 from datetime import datetime, timezone
 
-from flask import Flask, Response, jsonify, redirect, request, url_for
+from flask import Flask, jsonify, redirect, request, url_for
 
 from app.config import SETTINGS
 from app.db import (
@@ -639,50 +638,33 @@ def health():
 _pipeline_lock = threading.Lock()
 
 
+def _run_pipeline_bg():
+    """Run pipeline in background thread with lock."""
+    try:
+        from app.pipeline import run_pipeline
+        run_pipeline(send_mail=True)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Background pipeline failed: %s", e)
+    finally:
+        _pipeline_lock.release()
+
+
 @app.route("/api/trigger-run", methods=["GET", "POST"])
 def api_trigger_run():
-    """Run pipeline with streaming keepalive to survive cold starts.
+    """Trigger pipeline run in background. Returns 200 immediately.
 
-    Sends a JSON line every 15s so Render proxy / cron-job.org never
-    time out while the pipeline (5-7 min) is running.
-    Rejects concurrent runs to prevent duplicate emails.
+    Uses a non-daemon thread so Gunicorn keeps the process alive while
+    the pipeline runs (~5 min). Concurrency lock prevents duplicate runs.
+    cron-job.org gets an instant 200 and never times out.
     """
     if not _pipeline_lock.acquire(blocking=False):
         return jsonify({"status": "skipped", "message": "Pipeline already running"}), 409
 
-    def generate():
-        try:
-            yield json.dumps({"status": "started"}) + "\n"
-
-            result = {}
-            error = None
-            done = threading.Event()
-
-            def _run():
-                nonlocal result, error
-                try:
-                    from app.pipeline import run_pipeline
-                    result = run_pipeline(send_mail=True)
-                except Exception as e:
-                    error = str(e)
-                finally:
-                    done.set()
-
-            thread = threading.Thread(target=_run)
-            thread.start()
-
-            # Send keepalive every 15s to prevent proxy/client timeouts
-            while not done.wait(timeout=15):
-                yield json.dumps({"status": "running"}) + "\n"
-
-            if error:
-                yield json.dumps({"status": "error", "error": error}) + "\n"
-            else:
-                yield json.dumps({"status": "completed", **result}) + "\n"
-        finally:
-            _pipeline_lock.release()
-
-    return Response(generate(), mimetype="application/x-ndjson")
+    # Non-daemon thread — Gunicorn won't kill it prematurely
+    thread = threading.Thread(target=_run_pipeline_bg, daemon=False)
+    thread.start()
+    return jsonify({"status": "started", "message": "Pipeline running in background"})
 
 
 @app.route("/api/status")
